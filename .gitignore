@@ -1,0 +1,14 @@
+# 依赖与构建
+node_modules/
+dist/
+.cache/
+# pnpm 本地内容寻址存储（注意是 .store，不是 store）
+.store/
+*.log
+
+# macOS 杂项
+.DS_Store
+
+# 图标中间产物（保留源 SVG 与最终 icns）
+build/icon-raw.png
+build/icon.iconset/

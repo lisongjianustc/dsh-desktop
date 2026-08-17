@@ -1,0 +1,18 @@
+{
+  "name": "dsh-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH Desktop — Electron shell for the DeepSeek Harness web UI (local launcher, tray resident, auto backend lifecycle)",
+  "main": "src/main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "DSH_DESKTOP_SMOKE=1 electron .",
+    "render-icon": "electron scripts/render-icon.cjs",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  }
+}

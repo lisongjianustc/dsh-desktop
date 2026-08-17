@@ -1,0 +1,23 @@
+appId: com.dsh.desktop
+productName: DSH Desktop
+asar: true
+# use the already-downloaded Electron distribution (no network, no global cache)
+electronDist: node_modules/electron/dist
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - package.json
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  identity: "-"
+  target:
+    - target: dmg
+      arch:
+        - arm64
+dmg:
+  title: "DSH Desktop ${version}"
+  artifactName: DSH-Desktop-${version}-${arch}.${ext}
+npmRebuild: false

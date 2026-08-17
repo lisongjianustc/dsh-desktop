@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>DSH Desktop 设置</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: #0b0f1a; color: #e6e9f2; font-size: 13px;
+    padding: 18px 20px 24px;
+  }
+  h1 { font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+  .sub { color: #8a93a9; font-size: 12px; margin-bottom: 18px; }
+  section { margin-bottom: 22px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #6f7d9c; margin-bottom: 10px; }
+  .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #1a2136; }
+  .field:last-child { border-bottom: none; }
+  .field label { flex: 1; }
+  .field .hint { display: block; color: #707b96; font-size: 11px; margin-top: 2px; }
+  select, input[type=text] {
+    background: #151c30; color: #e6e9f2; border: 1px solid #28304a; border-radius: 7px;
+    padding: 6px 10px; font-size: 12px; min-width: 160px;
+  }
+  input[type=checkbox] { width: 16px; height: 16px; accent-color: #4D6BFE; }
+  button {
+    background: #4D6BFE; color: #fff; border: none; border-radius: 8px; padding: 7px 16px;
+    font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: #5d78ff; }
+  button.secondary { background: #1c2337; color: #cdd4e6; }
+  button.secondary:hover { background: #28304a; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #9fb0d8; }
+  pre {
+    margin-top: 10px; background: #101627; border: 1px solid #232c47; border-radius: 10px;
+    padding: 10px 12px; font-size: 11px; line-height: 1.5; color: #a8b3cc; max-height: 220px;
+    overflow: auto; white-space: pre-wrap; word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge.ok { background: #123b2a; color: #5fd39a; }
+  .badge.off { background: #3a1d24; color: #f08c9a; }
+  .statusline { margin-top: 6px; color: #8a93a9; font-size: 11px; }
+</style>
+</head>
+<body>
+  <h1>DSH Desktop 设置</h1>
+  <div class="sub">桌面壳只负责进程编排，全部功能与插件由本机 dsh 的 Web 界面提供。</div>
+
+  <section>
+    <h2>窗口行为</h2>
+    <div class="field">
+      <label>关闭窗口时
+        <span class="hint">「保持后端后台运行」会驻留菜单栏托盘，可从托盘图标随时重新打开。</span>
+      </label>
+      <select id="closeBehavior">
+        <option value="ask">每次询问</option>
+        <option value="background">保持后端后台运行</option>
+        <option value="quit">结束所有进程并退出</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>最小化时隐藏到托盘
+        <span class="hint">无论是否开启，最小化都不会影响后端运行。</span>
+      </label>
+      <input type="checkbox" id="minimizeToTray" />
+    </div>
+    <div class="field">
+      <label>自动检查更新
+        <span class="hint">启动时 + 每 24 小时检查一次（升级本机 dsh = 桌面端同步更新）。</span>
+      </label>
+      <input type="checkbox" id="autoUpdateCheck" />
+    </div>
+  </section>
+
+  <section>
+    <h2>通知</h2>
+    <div class="field">
+      <label>审批 / 提问到达时
+        <span class="hint">「窗口不可见」= 托盘驻留、最小化或窗口在后台时发系统通知，点击通知即可回到 DSH。</span>
+      </label>
+      <select id="notifyMode">
+        <option value="hidden">仅窗口不可见时</option>
+        <option value="always">总是通知</option>
+        <option value="off">关闭</option>
+      </select>
+    </div>
+  </section>
+
+  <section>
+    <h2>后端</h2>
+    <div class="field">
+      <label>dsh 路径
+        <span class="hint">留空自动探测（~/Library/pnpm/dsh 或登录 shell 的 PATH）。</span>
+      </label>
+      <input type="text" id="dshPath" placeholder="自动探测" style="min-width:220px" />
+    </div>
+    <div class="field">
+      <label>DSH_HOME 覆盖
+        <span class="hint">留空使用默认 ~/.dsh（与终端共用会话、设置与插件）。</span>
+      </label>
+      <input type="text" id="dshHome" placeholder="~/.dsh" style="min-width:220px" />
+    </div>
+    <div class="row" style="margin-top:10px">
+      <span class="mono" id="backendInfo">后端状态未知</span>
+      <button id="btnRestart" class="secondary">重启后端</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>更新</h2>
+    <div class="row">
+      <button id="btnCheck">检查更新</button>
+      <button id="btnApply" class="secondary">立即更新到最新</button>
+      <span class="mono" id="updateInfo"></span>
+    </div>
+    <pre id="updateLog" class="hidden"></pre>
+  </section>
+
+  <section>
+    <h2>排障</h2>
+    <div class="row">
+      <button id="btnLogs" class="secondary">打开日志目录</button>
+    </div>
+  </section>
+
+<script>
+  const $ = (id) => document.getElementById(id)
+  const api = window.desktopSettings
+
+  const renderConfig = (c) => {
+    $('closeBehavior').value = c.closeBehavior
+    $('minimizeToTray').checked = !!c.minimizeToTray
+    $('autoUpdateCheck').checked = !!c.autoUpdateCheck
+    $('notifyMode').value = c.notifyMode || 'hidden'
+    $('dshPath').value = c.dshPath || ''
+    $('dshHome').value = c.dshHome || ''
+  }
+
+  $('closeBehavior').addEventListener('change', () => api.setConfig({ closeBehavior: $('closeBehavior').value }))
+  $('minimizeToTray').addEventListener('change', () => api.setConfig({ minimizeToTray: $('minimizeToTray').checked }))
+  $('autoUpdateCheck').addEventListener('change', () => api.setConfig({ autoUpdateCheck: $('autoUpdateCheck').checked }))
+  $('notifyMode').addEventListener('change', () => api.setConfig({ notifyMode: $('notifyMode').value }))
+  $('dshPath').addEventListener('change', () => api.setConfig({ dshPath: $('dshPath').value.trim() }))
+  $('dshHome').addEventListener('change', () => api.setConfig({ dshHome: $('dshHome').value.trim() }))
+
+  const refreshBackend = async () => {
+    const info = await api.backendInfo()
+    if (info.state === 'running') {
+      $('backendInfo').textContent = `运行中 · ${info.url} · dsh ${info.version || '未知版本'}`
+    } else if (info.state === 'not-installed') {
+      $('backendInfo').textContent = '未找到 dsh —— 请配置路径，或安装：pnpm add -g @deepseek-ai/dsh'
+    } else {
+      $('backendInfo').textContent = `后端状态：${info.state}`
+    }
+  }
+  $('btnRestart').addEventListener('click', async () => { $('backendInfo').textContent = '重启中…'; await api.restartBackend(); setTimeout(refreshBackend, 1500) })
+  $('btnLogs').addEventListener('click', () => api.openLogs())
+
+  $('btnCheck').addEventListener('click', async () => {
+    $('updateInfo').textContent = '检查中…'
+    const r = await api.checkUpdate()
+    $('updateInfo').textContent = r
+      ? `当前 ${r.current} · 最新 ${r.latest}${r.hasUpdate ? ' · 有新版本' : ' · 已是最新'}`
+      : '检查失败（网络或 dsh 不可用）'
+  })
+
+  $('btnApply').addEventListener('click', async () => {
+    $('updateLog').classList.remove('hidden')
+    $('updateLog').textContent = ''
+    api.applyUpdate()
+  })
+
+  api.onUpdateLog((line) => {
+    const el = $('updateLog')
+    el.classList.remove('hidden')
+    el.textContent += line + '\n'
+    el.scrollTop = el.scrollHeight
+  })
+  api.onUpdateDone((r) => {
+    $('updateInfo').textContent = r.ok ? '更新完成，后端已重启' : `更新失败：${r.message || '见日志'}`
+    refreshBackend()
+  })
+
+  api.getConfig().then(renderConfig)
+  refreshBackend()
+</script>
+</body>
+</html>
