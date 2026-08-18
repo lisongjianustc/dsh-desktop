@@ -386,7 +386,13 @@ function boot() {
     })
     ipcMain.handle('backend:info', (e) =>
       isOurSender(e)
-        ? { state: backend.state, url: backend.url, version: backend.dshVersion, path: backend.dshPath }
+        ? {
+            state: backend.state,
+            url: backend.url,
+            version: backend.dshVersion,
+            mode: backend.dshInvocation && backend.dshInvocation.mode,
+            path: backend.dshInvocation && (backend.dshInvocation.path || null),
+          }
         : null
     )
     ipcMain.handle('backend:restart', async (e) => {

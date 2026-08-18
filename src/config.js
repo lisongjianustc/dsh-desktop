@@ -4,6 +4,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const DEFAULTS = {
+  // 后端 dsh 启动方式：'auto' 自动（直接优先 → npx）| 'direct' 直接调用已安装的 dsh | 'npx' 走 npx -y @deepseek-ai/dsh
+  dshInvocationMode: 'auto',
   // 后端 dsh 可执行文件路径；留空 = 自动探测（~/Library/pnpm/dsh → 登录 shell command -v dsh）
   dshPath: '',
   // DSH_HOME 覆盖；留空 = 默认（~/.dsh）

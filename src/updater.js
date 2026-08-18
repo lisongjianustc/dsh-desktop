@@ -201,13 +201,14 @@ class Updater {
       } catch {}
     }
     try {
-      const dshPath = this.backend.dshPath || (await this.backend.findDsh())
-      if (!dshPath) {
+      const inv = this.backend.dshInvocation || (await this.backend.findDshInvocation())
+      if (!inv) {
         dialog.showMessageBox(this.getWindow(), {
           type: 'error',
           title: '更新失败',
           message: '未找到 dsh',
-          detail: '请先在设置中配置 dsh 路径，或重新安装：pnpm add -g @deepseek-ai/dsh',
+          detail:
+            '请先在设置中配置 dsh 路径，或直接调用：`npx -y @deepseek-ai/dsh`。',
           buttons: ['好的'],
         })
         finish(false, '未找到 dsh')
@@ -216,33 +217,55 @@ class Updater {
       if (interactive) this.openSettings()
       this._log('开始更新…')
 
-      // 1. upgrade the global dsh install
-      this._log('步骤 1/3：pnpm add -g @deepseek-ai/dsh@latest …')
-      const r1 = await this._runLoginShell('pnpm add -g @deepseek-ai/dsh@latest', {
-        onLine: (l) => this._log(`[pnpm] ${l}`),
-      })
-      if (!r1.ok) {
-        this._log('步骤 1 失败，请查看上方日志（可能是网络或权限问题）')
-        if (interactive) {
-          dialog.showMessageBox(this.getWindow(), {
-            type: 'error',
-            title: '更新失败',
-            message: '升级 dsh 失败',
-            detail: 'pnpm add -g 执行失败，请打开日志查看原因。',
-            buttons: ['好的'],
+      // 1. upgrade the global dsh install (skipped in npx mode — npx has no
+      //    persistent install; the next `npx -y @deepseek-ai/dsh …`
+      //    invocation resolves to the latest cached or freshly fetched
+      //    version automatically).
+      if (inv.mode === 'direct') {
+        this._log('步骤 1/3：pnpm add -g @deepseek-ai/dsh@latest …')
+        const r1 = await this._runLoginShell('pnpm add -g @deepseek-ai/dsh@latest', {
+          onLine: (l) => this._log(`[pnpm] ${l}`),
+        })
+        if (!r1.ok) {
+          this._log('pnpm add -g 失败，尝试 npm install -g …')
+          const r1b = await this._runLoginShell('npm install -g @deepseek-ai/dsh@latest', {
+            onLine: (l) => this._log(`[npm] ${l}`),
           })
+          if (!r1b.ok) {
+            this._log('步骤 1 失败，请查看上方日志（可能是网络或权限问题）')
+            if (interactive) {
+              dialog.showMessageBox(this.getWindow(), {
+                type: 'error',
+                title: '更新失败',
+                message: '升级 dsh 失败',
+                detail: 'pnpm 和 npm 均升级失败，请打开日志查看原因。',
+                buttons: ['好的'],
+              })
+            }
+            finish(false, '持久安装升级失败')
+            return
+          }
         }
-        finish(false, 'pnpm add -g 失败')
-        return
+        this._log('步骤 1/3 完成')
+      } else {
+        this._log(
+          '步骤 1/3：DSH 通过 npx 运行——跳过持久安装；步骤 3 重启后端时 npx 会拉取最新版本。'
+        )
       }
-      this._log('步骤 1/3 完成')
 
-      // 2. update web profile plugins (web-ui-all etc.; file: local packages untouched)
-      this._log('步骤 2/3：更新 web profile 插件（dsh plugin --profile web update）…')
-      const r2 = await this._runLoginShell(`"${dshPath.replace(/"/g, '\\"')}" plugin --profile web update`, {
+      // 2. update web profile plugins (web-ui-all etc.; file: local packages
+      //    untouched). Works in both modes — just compose the right command.
+      let pluginCmd
+      if (inv.mode === 'direct') {
+        pluginCmd = `"${inv.path.replace(/"/g, '\\"')}"`
+      } else {
+        pluginCmd = `"npx" "-y" "@deepseek-ai/dsh"`
+      }
+      this._log('步骤 2/3：更新 web profile 插件（plugin --profile web update）…')
+      const r2 = await this._runLoginShell(`${pluginCmd} plugin --profile web update`, {
         onLine: (l) => this._log(`[plugin] ${l}`),
       })
-      if (!r2.ok) this._log('步骤 2/3 未完全成功（不影响官方更新，请检查日志）')
+      if (!r2.ok) this._log('步骤 2/3 未完全成功（不影响主要更新，请检查日志）')
       else this._log('步骤 2/3 完成')
 
       // 3. restart the backend on the same lifecycle path
