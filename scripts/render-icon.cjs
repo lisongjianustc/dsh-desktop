@@ -33,7 +33,8 @@ async function render(size, outPath) {
 
 app.whenReady().then(async () => {
   fs.mkdirSync(assetsDir, { recursive: true })
-  const n = await render(1024, path.join(root, 'build', 'icon-raw.png'))
+  const raw = path.join(root, 'build', 'icon-raw.png')
+  const n = await render(1024, raw)
   console.log(`ICONS OK raw=${n} (retina capture, derived sizes via sips)`)
   app.exit(0)
 }).catch((err) => {

@@ -9,6 +9,7 @@
     "start": "electron .",
     "smoke": "DSH_DESKTOP_SMOKE=1 electron .",
     "render-icon": "electron scripts/render-icon.cjs",
+    "derive-icons": "node scripts/derive-icons.cjs",
     "dist": "electron-builder --mac"
   },
   "devDependencies": {
