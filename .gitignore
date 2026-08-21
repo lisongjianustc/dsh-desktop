@@ -12,3 +12,7 @@ dist/
 # 图标中间产物（保留源 SVG 与最终 icns）
 build/icon-raw.png
 build/icon.iconset/
+# electron/electron-builder 本地缓存
+.electron-cache/
+.electron-builder-cache/
+.pnpm-store/
