@@ -93,17 +93,18 @@
     <h2>后端</h2>
     <div class="field">
       <label>启动方式
-        <span class="hint">自动（默认）= 直接路径优先；未安装时回退到 <code>npx -y @deepseek-ai/dsh</code>。直接 = 仅当本机已有 dsh shim 才连接。npx = 强制走 npx，无需本机安装。</span>
+        <span class="hint">自动（默认）= 直接路径优先；未安装时回退到 <code>pnpm dlx @deepseek-ai/dsh</code>，再回退到旧 <code>npx -y @deepseek-ai/dsh</code>。pnpm = 强制走 pnpm dlx，无需本机安装。</span>
       </label>
       <select id="dshInvocationMode">
         <option value="auto">自动</option>
         <option value="direct">直接调用 dsh</option>
-        <option value="npx">通过 npx</option>
+        <option value="pnpm">通过 pnpm（dlx）</option>
+        <option value="npx">通过 npx（旧）</option>
       </select>
     </div>
     <div class="field">
       <label>dsh 路径
-        <span class="hint">留空自动探测（~/Library/pnpm/dsh 或登录 shell 的 PATH）。仅在「直接」模式下生效。</span>
+        <span class="hint">留空自动探测（~/Library/pnpm/dsh、~/Library/pnpm/bin/dsh 或登录 shell 的 PATH）。仅在「直接」模式下生效。</span>
       </label>
       <input type="text" id="dshPath" placeholder="自动探测" style="min-width:220px" />
     </div>
@@ -159,8 +160,9 @@
   $('dshHome').addEventListener('change', () => api.setConfig({ dshHome: $('dshHome').value.trim() }))
 
   const fmtMode = (info) => {
-    if (info.dshMode === 'npx') return 'npx'
-    if (info.dshMode === 'direct') return info.path ? `直接 ${info.path}` : '直接'
+    if (info.mode === 'pnpm') return 'pnpm'
+    if (info.mode === 'npx') return 'npx'
+    if (info.mode === 'direct') return info.path ? `直接 ${info.path}` : '直接'
     return '未识别'
   }
 
@@ -169,7 +171,7 @@
     if (info.state === 'running') {
       $('backendInfo').textContent = `运行中 · ${info.url} · dsh ${info.version || '未知版本'} · 模式 ${fmtMode(info)}`
     } else if (info.state === 'not-installed') {
-      $('backendInfo').textContent = '未找到 dsh —— 请在「启动方式」中切换到 npx，或直接调用 dsh / 安装：pnpm add -g @deepseek-ai/dsh'
+      $('backendInfo').textContent = '未找到 dsh —— 请在「启动方式」中切换到 pnpm（或 npx），或直接调用 dsh / 安装：pnpm add -g @deepseek-ai/dsh'
     } else {
       $('backendInfo').textContent = `后端状态：${info.state}`
     }

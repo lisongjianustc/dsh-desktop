@@ -3,7 +3,7 @@
 # tree, then kills the watchdog's "parent" and verifies the ENTIRE
 # subtree (parent + grandchild) is reaped, not left as orphans.
 # This validates the detached:true + process.kill(-pid) pattern that the
-# Electron app relies on for npx chains.
+# Electron app relies on for pnpm/npx chains.
 cat > /tmp/wg-grandchild.cjs <<'EOF'
 const fs = require('fs')
 fs.writeFileSync('/tmp/wg-tree.log', `grandchild started pid=${process.pid} ppid=${process.ppid}\n`, { flag: 'a' })

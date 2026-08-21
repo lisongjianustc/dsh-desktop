@@ -81,7 +81,7 @@
       $('btn-restart').classList.remove('hidden')
     } else if (mode === 'notinstalled') {
       $('title').textContent = '未找到 dsh'
-      $('desc').textContent = 'DSH Desktop 需要本机安装的 dsh 提供 Web 界面。请打开「设置」完成安装或配置 dsh 路径。'
+      $('desc').textContent = 'DSH Desktop 需要本机安装的 dsh 提供 Web 界面。请打开「设置」选择 pnpm/npx 启动方式、安装 dsh（pnpm add -g @deepseek-ai/dsh）或配置 dsh 路径。'
       $('btn-restart').classList.remove('hidden')
       $('btn-restart').textContent = '重新检测'
     }

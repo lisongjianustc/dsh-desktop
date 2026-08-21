@@ -3,10 +3,11 @@
 // Usage: node watchdog.js --parent <electronPid> -- <cmd> <args...>
 //
 // Spawns the backend inside its own process group (detached:true) so a
-// single signal to the whole group reaps npx's transitive children as well
-// as the dsh host itself — the desktop shell may launch dsh either as a
-// direct shim (~/Library/pnpm/dsh or any PATH-resolved binary) or via
-// `npx -y @deepseek-ai/dsh`, the latter creates an extra process wrapper.
+// single signal to the whole group reaps pnpm/npx's transitive children as
+// well as the dsh host itself — the desktop shell may launch dsh either as
+// a direct shim (~/Library/pnpm/dsh or ~/Library/pnpm/bin/dsh, or any PATH-resolved binary) or via
+// `pnpm dlx @deepseek-ai/dsh` / `npx -y @deepseek-ai/dsh`, which creates
+// an extra process wrapper.
 //
 // Responsibilities:
 //  1. Spawn the backend with stdio inherited so the parent's `dsh web:`
@@ -44,7 +45,7 @@ let child
 
 try {
   // detached:true creates a new process group with pgid = child.pid, so
-  // `process.kill(-child.pid, sig)` reaches every descendant (npx → node dsh).
+  // `process.kill(-child.pid, sig)` reaches every descendant (pnpm/npx → node dsh).
   child = spawn(cmd, args, {
     stdio: ['ignore', 'inherit', 'inherit'],
     env: process.env,

@@ -7,6 +7,7 @@ const { dialog } = require('electron')
 const { appInfo } = require('./logs')
 
 const HOUR = 3600 * 1000
+const DSH_PACKAGE = '@deepseek-ai/dsh'
 
 function parseVersion(v) {
   const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?/.exec(String(v ?? '').trim())
@@ -91,10 +92,12 @@ class Updater {
     this._loginEnv = this._runLoginShell('print -r -- "$PATH"', { timeoutMs: 10000 }).then((r) => {
       const p = r.out.trim()
       if (!p) return process.env.PATH || ''
-      // prepend pnpm global bin so pnpm/npm resolve reliably
+      // prepend pnpm global bin dirs (new pnpm uses ~/Library/pnpm/bin,
+      // older layouts used ~/Library/pnpm) so pnpm/npm/dsh resolve reliably
       const os = require('node:os')
       const path = require('node:path')
-      return `${path.join(os.homedir(), 'Library', 'pnpm')}:${p}`
+      const pnpmRoot = path.join(os.homedir(), 'Library', 'pnpm')
+      return `${path.join(pnpmRoot, 'bin')}:${pnpmRoot}:${p}`
     })
     return this._loginEnv
   }
@@ -110,29 +113,36 @@ class Updater {
 
   async _getLatestVersion() {
     const env = await this._spawnEnv()
-    return new Promise((resolve) => {
-      const child = spawn('npm', ['view', '@deepseek-ai/dsh', 'version'], {
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+    const tryView = (cmd, args) =>
+      new Promise((resolve) => {
+        const child = spawn(cmd, args, {
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+        let out = ''
+        const timer = setTimeout(() => {
+          try {
+            child.kill('SIGKILL')
+          } catch {}
+          resolve(null)
+        }, 30000)
+        child.stdout.on('data', (d) => (out += String(d)))
+        child.on('error', () => {
+          clearTimeout(timer)
+          resolve(null)
+        })
+        child.on('exit', (code) => {
+          clearTimeout(timer)
+          const v = out.trim().split('\n')[0]
+          resolve(code === 0 && v ? v : null)
+        })
       })
-      let out = ''
-      const timer = setTimeout(() => {
-        try {
-          child.kill('SIGKILL')
-        } catch {}
-        resolve(null)
-      }, 30000)
-      child.stdout.on('data', (d) => (out += String(d)))
-      child.on('error', () => {
-        clearTimeout(timer)
-        resolve(null)
-      })
-      child.on('exit', (code) => {
-        clearTimeout(timer)
-        const v = out.trim().split('\n')[0]
-        resolve(code === 0 && v ? v : null)
-      })
-    })
+
+    // pnpm is the preferred package manager in this project; keep npm view as
+    // a fallback for older environments.
+    const viaPnpm = await tryView('pnpm', ['view', DSH_PACKAGE, 'version'])
+    if (viaPnpm) return viaPnpm
+    return tryView('npm', ['view', DSH_PACKAGE, 'version'])
   }
 
   async check({ interactive = false } = {}) {
@@ -149,7 +159,7 @@ class Updater {
             type: 'info',
             title: '检查更新',
             message: '无法获取版本信息',
-            detail: !cur ? '无法确定当前 dsh 版本（dsh 未安装或不可用）。' : '网络不可用或 npm 查询失败，请稍后重试。',
+            detail: !cur ? '无法确定当前 dsh 版本（dsh 未安装或不可用）。' : '网络不可用或 pnpm/npm 查询失败，请稍后重试。',
             buttons: ['好的'],
           })
         }
@@ -208,7 +218,7 @@ class Updater {
           title: '更新失败',
           message: '未找到 dsh',
           detail:
-            '请先在设置中配置 dsh 路径，或直接调用：`npx -y @deepseek-ai/dsh`。',
+            '请先在设置中配置 dsh 路径，或直接调用：`pnpm dlx @deepseek-ai/dsh`（旧环境为 `npx -y @deepseek-ai/dsh`）。',
           buttons: ['好的'],
         })
         finish(false, '未找到 dsh')
@@ -217,8 +227,8 @@ class Updater {
       if (interactive) this.openSettings()
       this._log('开始更新…')
 
-      // 1. upgrade the global dsh install (skipped in npx mode — npx has no
-      //    persistent install; the next `npx -y @deepseek-ai/dsh …`
+      // 1. upgrade the global dsh install (skipped in pnpm/npx dlx modes —
+      //    dlx has no persistent install; the next `pnpm dlx`/`npx -y`
       //    invocation resolves to the latest cached or freshly fetched
       //    version automatically).
       if (inv.mode === 'direct') {
@@ -248,16 +258,20 @@ class Updater {
         }
         this._log('步骤 1/3 完成')
       } else {
+        const dlxName = inv.mode === 'pnpm' ? 'pnpm dlx' : 'npx -y'
         this._log(
-          '步骤 1/3：DSH 通过 npx 运行——跳过持久安装；步骤 3 重启后端时 npx 会拉取最新版本。'
+          `步骤 1/3：DSH 通过 ${dlxName} 运行——跳过持久安装；步骤 3 重启后端时 ${dlxName} 会拉取最新版本。`
         )
       }
 
       // 2. update web profile plugins (web-ui-all etc.; file: local packages
-      //    untouched). Works in both modes — just compose the right command.
+      //    untouched). Works in all modes — just compose the right command.
       let pluginCmd
       if (inv.mode === 'direct') {
         pluginCmd = `"${inv.path.replace(/"/g, '\\"')}"`
+      } else if (inv.mode === 'pnpm') {
+        const launcher = (inv.path || 'pnpm').replace(/"/g, '\\"')
+        pluginCmd = `"${launcher}" "dlx" "@deepseek-ai/dsh"`
       } else {
         pluginCmd = `"npx" "-y" "@deepseek-ai/dsh"`
       }

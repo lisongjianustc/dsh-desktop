@@ -1,8 +1,9 @@
 // backend.js — owns the dsh host process: locate the launcher (direct
-// shim or `npx -y @deepseek-ai/dsh`), repair PATH (Finder-launched GUI
-// processes lack the shell PATH), spawn through the watchdog (which runs
-// the child in its own process group, so npx → node dsh descendants are
-// reaped together), wait for readiness, shut down / restart on demand.
+// shim, `pnpm dlx @deepseek-ai/dsh`, or legacy `npx -y @deepseek-ai/dsh`),
+// repair PATH (Finder-launched GUI processes lack the shell PATH), spawn
+// through the watchdog (which runs the child in its own process group, so
+// pnpm/npx → node dsh descendants are reaped together), wait for readiness,
+// shut down / restart on demand.
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const http = require('node:http')
@@ -13,7 +14,8 @@ const { appInfo, backendLine } = require('./logs')
 const READY_URL_RE = /dsh web:\s+(https?:\/\/[^\s)]+)/
 const STARTUP_TIMEOUT_MS = 90 * 1000
 const POLL_INTERVAL_MS = 400
-const NPX_PROBE_TIMEOUT_MS = 30000
+const PROBE_TIMEOUT_MS = 30000
+const DSH_PACKAGE = '@deepseek-ai/dsh'
 
 function httpGet(url, timeoutMs = 3000) {
   return new Promise((resolve) => {
@@ -39,11 +41,12 @@ class BackendManager {
     this.childPid = null
     this.url = null
     this.port = null
-    // Invocation shape: { mode: 'direct'|'npx', path?: string }
-    // mode 'direct'  — invoke an existing dsh binary at `path`
-    // mode 'npx'     — invoke `npx -y @deepseek-ai/dsh …` (no local install)
+    // Invocation shape: { mode: 'direct'|'pnpm'|'npx', path?: string }
+    // mode 'direct' — invoke an existing dsh binary at `path`
+    // mode 'pnpm'   — invoke `pnpm dlx @deepseek-ai/dsh …` (no local install)
+    // mode 'npx'    — invoke `npx -y @deepseek-ai/dsh …` (legacy no-local-install)
     this.dshInvocation = null
-    // Backwards-compatible string pointer (undefined in npx mode):
+    // Backwards-compatible string pointer (undefined in pnpm/npx mode):
     this.dshPath = null
     this.dshVersion = null
     this.state = 'stopped' // stopped | starting | running | not-installed | error
@@ -98,21 +101,61 @@ class BackendManager {
     return this._loginEnv
   }
 
-  // Spawn a probe for `npx -y @deepseek-ai/dsh --version`. Returns true only
-  // when npx actually resolved and launched the package; this both validates
-  // availability AND warms the npm cache so the next real backend launch is
-  // instant.
+  // Spawn a probe for `pnpm dlx @deepseek-ai/dsh --version`. Returns the
+  // resolved pnpm binary path when pnpm actually resolved and launched the
+  // package; this both validates availability AND warms pnpm's store so the
+  // next real backend launch is instant.
+  async _probePnpm() {
+    const where = await this._runLoginShell('command -v pnpm', 5000)
+    if (!where.ok || !where.out.trim()) {
+      appInfo('backend: pnpm not found in login PATH')
+      return null
+    }
+    const pnpmPath = where.out.trim().split('\n')[0]
+    const env = await this._buildEnv()
+    return new Promise((resolve) => {
+      let out = ''
+      const child = spawn(pnpmPath, ['dlx', DSH_PACKAGE, '--version'], {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      const timer = setTimeout(() => {
+        try {
+          child.kill('SIGKILL')
+        } catch {}
+        appInfo('backend: pnpm probe timed out')
+        resolve(null)
+      }, PROBE_TIMEOUT_MS)
+      child.stdout.on('data', (d) => (out += String(d)))
+      child.stderr.on('data', () => {})
+      child.on('error', () => {
+        clearTimeout(timer)
+        resolve(null)
+      })
+      child.on('exit', (code) => {
+        clearTimeout(timer)
+        const v = out.trim().split('\n').pop() || ''
+        const ok = code === 0 && /\d+\.\d+/.test(v)
+        if (ok) appInfo(`backend: pnpm probe ok (resolved ${DSH_PACKAGE} → ${v})`)
+        else appInfo(`backend: pnpm probe failed (exit=${code}, stderr suppressed)`)
+        resolve(ok ? pnpmPath : null)
+      })
+    })
+  }
+
+  // Legacy npx probe (kept so existing `npx` mode and auto-fallback still
+  // work after switching to pnpm-first). Returns the npx binary path or null.
   async _probeNpx() {
     const where = await this._runLoginShell('command -v npx', 5000)
     if (!where.ok || !where.out.trim()) {
       appInfo('backend: npx not found in login PATH')
-      return false
+      return null
     }
     const npxPath = where.out.trim().split('\n')[0]
     const env = await this._buildEnv()
     return new Promise((resolve) => {
       let out = ''
-      const child = spawn(npxPath, ['-y', '@deepseek-ai/dsh', '--version'], {
+      const child = spawn(npxPath, ['-y', DSH_PACKAGE, '--version'], {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -121,27 +164,27 @@ class BackendManager {
           child.kill('SIGKILL')
         } catch {}
         appInfo('backend: npx probe timed out')
-        resolve(false)
-      }, NPX_PROBE_TIMEOUT_MS)
+        resolve(null)
+      }, PROBE_TIMEOUT_MS)
       child.stdout.on('data', (d) => (out += String(d)))
       child.stderr.on('data', () => {})
       child.on('error', () => {
         clearTimeout(timer)
-        resolve(false)
+        resolve(null)
       })
       child.on('exit', (code) => {
         clearTimeout(timer)
         const v = out.trim().split('\n').pop() || ''
         const ok = code === 0 && /\d+\.\d+/.test(v)
-        if (ok) appInfo(`backend: npx probe ok (resolved @deepseek-ai/dsh → ${v})`)
+        if (ok) appInfo(`backend: npx probe ok (resolved ${DSH_PACKAGE} → ${v})`)
         else appInfo(`backend: npx probe failed (exit=${code}, stderr suppressed)`)
-        resolve(ok)
+        resolve(ok ? npxPath : null)
       })
     })
   }
 
-  // The user may force direct or npx mode via config (default 'auto').
-  // auto: try direct first (as before), fall back to the npx probe.
+  // The user may force direct, pnpm, or legacy npx mode via config (default
+  // 'auto'). auto: direct first, then pnpm dlx, then legacy npx.
   async findDshInvocation() {
     const config = this.getConfig()
     const mode = config.dshInvocationMode || 'auto'
@@ -154,6 +197,8 @@ class BackendManager {
       }
       const pnpmShim = path.join(os.homedir(), 'Library', 'pnpm', 'dsh')
       if (fs.existsSync(pnpmShim)) return pnpmShim
+      const pnpmBinShim = path.join(os.homedir(), 'Library', 'pnpm', 'bin', 'dsh')
+      if (fs.existsSync(pnpmBinShim)) return pnpmBinShim
       const r = await this._runLoginShell('command -v dsh', 10000)
       const found = r.ok ? r.out.trim().split('\n')[0] : ''
       return found || null
@@ -173,10 +218,24 @@ class BackendManager {
       }
     }
 
+    if (mode === 'pnpm' || mode === 'auto') {
+      const pnpmPath = await this._probePnpm()
+      if (pnpmPath) {
+        this.dshInvocation = { mode: 'pnpm', path: pnpmPath }
+        this.dshPath = null
+        return this.dshInvocation
+      }
+      if (mode === 'pnpm') {
+        this.dshInvocation = null
+        this.dshPath = null
+        return null
+      }
+    }
+
     if (mode === 'npx' || mode === 'auto') {
-      const ok = await this._probeNpx()
-      if (ok) {
-        this.dshInvocation = { mode: 'npx' }
+      const npxPath = await this._probeNpx()
+      if (npxPath) {
+        this.dshInvocation = { mode: 'npx', path: npxPath }
         this.dshPath = null
         return this.dshInvocation
       }
@@ -198,8 +257,9 @@ class BackendManager {
   // the same Electron binary in plain-Node mode (ELECTRON_RUN_AS_NODE)
   async _buildEnv() {
     const loginPath = await this._getLoginEnv()
-    const pnpmBin = path.join(os.homedir(), 'Library', 'pnpm')
-    const env = { ...process.env, PATH: `${pnpmBin}:${loginPath}`, ELECTRON_RUN_AS_NODE: '1' }
+    const pnpmRoot = path.join(os.homedir(), 'Library', 'pnpm')
+    const pnpmBin = path.join(pnpmRoot, 'bin')
+    const env = { ...process.env, PATH: `${pnpmBin}:${pnpmRoot}:${loginPath}`, ELECTRON_RUN_AS_NODE: '1' }
     if (this.getConfig().dshHome) {
       env.DSH_HOME = this.getConfig().dshHome
     }
@@ -215,9 +275,12 @@ class BackendManager {
     if (this.dshInvocation.mode === 'direct') {
       cmd = this.dshInvocation.path
       args = extraArgs
+    } else if (this.dshInvocation.mode === 'pnpm') {
+      cmd = this.dshInvocation.path || 'pnpm'
+      args = ['dlx', DSH_PACKAGE, ...extraArgs]
     } else {
-      cmd = 'npx'
-      args = ['-y', '@deepseek-ai/dsh', ...extraArgs]
+      cmd = this.dshInvocation.path || 'npx'
+      args = ['-y', DSH_PACKAGE, ...extraArgs]
     }
     const env = await this._buildEnv()
     return new Promise((resolve) => {
@@ -243,7 +306,7 @@ class BackendManager {
   }
 
   async getVersion() {
-    return this._runInvocation(['--version'], { timeoutMs: NPX_PROBE_TIMEOUT_MS })
+    return this._runInvocation(['--version'], { timeoutMs: PROBE_TIMEOUT_MS })
   }
 
   // ---------- lifecycle ----------
@@ -260,11 +323,13 @@ class BackendManager {
       appInfo('backend: dsh launcher not found')
       return { ok: false, reason: 'not-installed' }
     }
-    appInfo(
-      inv.mode === 'npx'
-        ? 'backend: using dsh via npx (-y @deepseek-ai/dsh)'
-        : `backend: using dsh at ${inv.path}`
-    )
+    if (inv.mode === 'pnpm') {
+      appInfo(`backend: using dsh via pnpm dlx ${DSH_PACKAGE}`)
+    } else if (inv.mode === 'npx') {
+      appInfo(`backend: using dsh via npx -y ${DSH_PACKAGE}`)
+    } else {
+      appInfo(`backend: using dsh at ${inv.path}`)
+    }
 
     const env = await this._buildEnv()
 
@@ -272,15 +337,28 @@ class BackendManager {
     let spawnArgs
     if (inv.mode === 'direct') {
       spawnArgs = [watchdog, '--parent', String(process.pid), '--', inv.path, 'web', '--port', '0']
+    } else if (inv.mode === 'pnpm') {
+      spawnArgs = [
+        watchdog,
+        '--parent',
+        String(process.pid),
+        '--',
+        inv.path || 'pnpm',
+        'dlx',
+        DSH_PACKAGE,
+        'web',
+        '--port',
+        '0',
+      ]
     } else {
       spawnArgs = [
         watchdog,
         '--parent',
         String(process.pid),
         '--',
-        'npx',
+        inv.path || 'npx',
         '-y',
-        '@deepseek-ai/dsh',
+        DSH_PACKAGE,
         'web',
         '--port',
         '0',
@@ -382,16 +460,16 @@ class BackendManager {
     const childPid = this.childPid
     appInfo(`backend: stopping (SIGTERM to watchdog${childPid ? ` + child pid ${childPid}` : ''})`)
     // First path: signal the watchdog directly — it kills the entire
-    // process group (works for both direct + npx chains).
+    // process group (works for direct + pnpm/npx chains).
     if (child) {
       try {
         child.kill('SIGTERM')
       } catch {}
     }
     // Second path: best-effort direct signal to the immediate child. In
-    // npx mode this is the npx wrapper; signal won't propagate to the
-    // dsh host there, but the group kill from the watchdog above covers
-    // that case independently.
+    // pnpm/npx mode this is the package-manager wrapper; signal won't
+    // propagate to the dsh host there, but the group kill from the watchdog
+    // above covers that case independently.
     if (childPid) {
       try {
         process.kill(childPid, 'SIGTERM')
